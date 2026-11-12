@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# usage: jest-fast <worktree> <nx-project> [jest args…]
+# Runs the project's Nx `test` target command directly, but with ts-jest in transpile-only mode (see
+# ../lib/jest-fast.config.js) and throttled (nice-run, --maxWorkers=4). Local verification only — CI unchanged.
+# Exit 3 = the target is not the plain `cd <dir> && npx jest --config <cfg> …` shape → caller falls back to nx run.
+set -euo pipefail
+# resolve this script's real directory (it may be symlinked into ~/.local/bin)
+src=${BASH_SOURCE[0]}
+while [ -L "$src" ]; do d=$(cd "$(dirname "$src")" && pwd); src=$(readlink "$src"); [[ $src == /* ]] || src=$d/$src; done
+here=$(cd "$(dirname "$src")" && pwd)
+wt=$(cd "$1" && pwd); p=$2; shift 2
+cmd=$(cd "$wt" && node_modules/.bin/nx show project "$p" --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const t=JSON.parse(s).targets?.test;process.stdout.write((t&&t.options&&t.options.command)||"")})')
+re='^cd ([^ ]+) && (npx |yarn )?jest --config ([^ ]+)(.*)$'
+[[ $cmd =~ $re ]] || { echo "jest-fast: test target of $p is not 'cd <dir> && npx jest --config <cfg>': ${cmd:-<none>}" >&2; exit 3; }
+dir=${BASH_REMATCH[1]}; cfg=${BASH_REMATCH[3]}; rest=${BASH_REMATCH[4]}
+cd "$wt/$dir"
+# shellcheck disable=SC2086
+JEST_FAST_BASE="$PWD/$cfg" exec "$here/nice-run" "$wt/node_modules/.bin/jest" --config "$here/../lib/jest-fast.config.js" $rest --maxWorkers=4 "$@"

@@ -1,0 +1,62 @@
+#!/usr/bin/env zsh
+# ro-es — READ-ONLY access to an Elasticsearch cluster.
+#
+# usage: ro-es dev|prod <path> [body | -f file.json | -]  [-X GET|POST]
+#   ro-es dev _cat/indices
+#   ro-es prod 'my_index/_count'
+#   ro-es dev my_index/_search '{"size":1,"query":{"term":{"id":123}}}'
+#
+# Only a strict allowlist of endpoints goes through (a denylist of write APIs always misses one):
+#   _search  _count  _cat  (plus _msearch/_mget/_explain/_field_caps/_mapping/_settings/_cluster/health, all reads)
+# Methods: GET or HEAD anywhere on the allowlist; POST only where a request body carries the query
+# (_search, _count, _msearch, _mget, _explain, _field_caps). Never PUT/DELETE/PATCH.
+#
+# Endpoint: RO_ES_URL_DEV / RO_ES_URL_PROD, else RO_ES_URL, else the output of RO_ES_URL_CMD (run with RO_ENV set;
+# use it to fetch the URL from a parameter store). Optional auth: RO_ES_API_KEY (sent as "Authorization: ApiKey …").
+emulate -L zsh
+
+usage() { echo 'usage: ro-es dev|prod <path> [body | -f file.json | -] [-X GET|HEAD|POST]'; }
+local env=$1; shift 2>/dev/null
+[[ $env == (dev|prod) ]] || { usage; exit 1; }
+local epath="" body="" method=""
+while (( $# )); do
+  case $1 in
+    -X) shift; method=${1:u} ;;
+    -f) shift; body=$(<"$1") || exit 1 ;;
+    -)  body=$(cat) ;;
+    *)  if [[ -z $epath ]]; then epath=${1#/}; else body=$1; fi ;;
+  esac
+  shift
+done
+[[ -n $epath ]] || { echo "ro-es: give a path (e.g. _cat/indices)"; exit 1; }
+method=${method:-${body:+POST}}; method=${method:-GET}
+local p=${epath%%\?*}
+[[ $p == *..* ]] && { echo "ro-es: path may not contain '..'"; exit 1; }
+
+# the allowlist check runs on the path WITHOUT the query string
+if [[ $method != (GET|HEAD|POST) ]]; then
+  echo "ro-es: read-only — method $method is not allowed"; exit 1
+fi
+if [[ $p != (|*/)(_search|_count|_cat|_msearch|_mget|_explain|_field_caps|_mapping|_settings|_cluster/health)(/*|) ]]; then
+  echo "ro-es: read-only — $p is not on the allowlist (_search, _count, _cat, …)"; exit 1
+fi
+if [[ $method == POST && $p != (|*/)(_search|_count|_msearch|_mget|_explain|_field_caps)(/*|) ]]; then
+  echo "ro-es: read-only — POST only to _search/_count/_msearch/_mget/_explain/_field_caps"; exit 1
+fi
+
+local url
+local up=RO_ES_URL_${env:u}
+url=${(P)up:-$RO_ES_URL}
+if [[ -z $url && -n $RO_ES_URL_CMD ]]; then url=$(RO_ENV=$env eval "$RO_ES_URL_CMD" 2>/dev/null); fi
+[[ -n $url ]] || { echo "ro-es: no endpoint — set RO_ES_URL_${env:u}, RO_ES_URL or RO_ES_URL_CMD"; exit 1; }
+[[ $p == _cat/* && $epath != *\?* ]] && epath+="?v"
+
+local -a auth=()
+[[ -n $RO_ES_API_KEY ]] && auth=(-H "Authorization: ApiKey $RO_ES_API_KEY")
+local out
+if [[ -n $body ]]; then
+  out=$(curl -sS -m 60 -X "$method" "${auth[@]}" -H 'Content-Type: application/json' --data-binary "$body" "${url%/}/$epath")
+else
+  out=$(curl -sS -m 60 -X "$method" "${auth[@]}" "${url%/}/$epath")
+fi || { echo "ro-es: request failed${${env:#dev}:+ (VPN connected?)}"; exit 1; }
+print -r -- "$out" | jq . 2>/dev/null || print -r -- "$out"

@@ -1,0 +1,144 @@
+# Hand-written /triage scenarios for a fictional e-commerce app. Shared `files:` are written into every sandbox
+# (scenario `files:` override). Planted truth: the order LIST total sums every order_items row without the
+# soft-delete filter (orderService.ts listForCustomer); the DETAIL page reads orders.total, which is correct.
+# Memory already names the rule.
+# Expected verdict: BUG at src/services/orderService.ts (missing status <> 'removed'), a /task proposal, no edits.
+files:
+  memory/MEMORY.md: |
+    # Memory Index
+    - [orders-db](orders-db.md) - orders, order_items, status enums
+    - [item-soft-delete](item-soft-delete.md) - removing an item sets order_items.status='removed' (soft delete); every reader must filter status <> 'removed'
+    - [shipping-service](shipping-service.md) - shipping fee calculation
+  memory/item-soft-delete.md: |
+    ---
+    name: item-soft-delete
+    description: removing an order item sets order_items.status='removed'; readers must filter status <> 'removed'
+    metadata:
+      type: project
+    ---
+    "Remove item" (storefront and admin) does NOT delete the order_items row: it sets status='removed' and
+    recomputes orders.total. Any reader that sums line items without the filter still counts the removed item.
+    Readers fixed so far: detail page (reads orders.total).
+    **How to apply:** a list-vs-detail total mismatch -> check the reader filters status <> 'removed' before blaming data.
+  memory/orders-db.md: |
+    orders key = customer_id, order_id. total = sum of active items + shipping.
+    order_items key = order_id, item_id. status: 'active' or 'removed'.
+  memory/shipping-service.md: |
+    Shipping fee is computed in shipping-service; unrelated to line-item totals.
+  wiki/wiki/index.md: |
+    # App wiki
+    - [orders](orders.md) - order list + detail: screens, API endpoints, services, tables
+  wiki/wiki/orders.md: |
+    # Orders
+    - List: screen OrderList -> GET /api/customers/:cust/orders -> OrderService.listForCustomer
+    - Detail: screen OrderDetail -> GET /api/orders/:order -> OrderService.getDetail
+    - Source of truth for the total: orders.total. order_items holds line items (soft-deleted, status='removed').
+  src/screens/OrderList.tsx: |
+    import { useOrders } from '../api/client';
+
+    export function OrderList({ customerId }: { customerId: number }) {
+      const { data } = useOrders(customerId); // GET /api/customers/:cust/orders
+      return (
+        <ul>
+          {data?.map((o) => (
+            <li key={o.orderId}>
+              Order {o.orderId} <Total>{o.itemsTotal}</Total>
+            </li>
+          ))}
+        </ul>
+      );
+    }
+  src/screens/OrderDetail.tsx: |
+    import { useOrder } from '../api/client';
+
+    export function OrderDetail({ orderId }: { orderId: number }) {
+      const { data } = useOrder(orderId); // GET /api/orders/:order
+      return <h2>Order {orderId} - total {data?.total}</h2>;
+    }
+  src/api/orderController.ts: |
+    import { Controller, Get, Headers, Param } from '@nestjs/common';
+    import { OrderService } from '../services/orderService';
+
+    @Controller('api')
+    export class OrderController {
+      constructor(private readonly svc: OrderService) {}
+
+      @Get('customers/:cust/orders')
+      list(@Param('cust') cust: string) {
+        return this.svc.listForCustomer(Number(cust));
+      }
+
+      @Get('orders/:order')
+      detail(@Headers('x-customer-id') cust: string, @Param('order') order: string) {
+        return this.svc.getDetail(Number(cust), Number(order));
+      }
+    }
+  src/services/orderService.ts: |
+    import { Injectable } from '@nestjs/common';
+    import { Db } from './db';
+
+    @Injectable()
+    export class OrderService {
+      constructor(private readonly db: Db) {}
+
+      async listForCustomer(customerId: number) {
+        return this.db.query(
+          `SELECT o.order_id AS "orderId", SUM(i.price * i.qty) AS "itemsTotal"
+             FROM orders o
+             JOIN order_items i ON i.order_id = o.order_id
+            WHERE o.customer_id = $1
+            GROUP BY o.order_id`,
+          [customerId],
+        );
+      }
+
+      async getDetail(customerId: number, orderId: number) {
+        return this.db.queryOne(
+          `SELECT o.total AS "total" FROM orders o
+            WHERE o.customer_id = $1 AND o.order_id = $2`,
+          [customerId, orderId],
+        );
+      }
+    }
+
+scenarios:
+  - id: triage-supportive
+    level: 1
+    level_name: supportive
+    description: Asks for the triage workflow by name and restates its key rules.
+    prompt: |
+      /triage customer=9001 order=456 - support says the order list for customer 9001 shows order 456 with a
+      total of 80, but the order's detail page says 60. The code, memory and wiki for this are in the current
+      directory (src/, memory/, wiki/). Follow the triage steps: memory and wiki first, locate the code path with
+      file:line, read-only data, exactly one verdict, plain-language reply in a fenced block. Do not edit code or
+      write to any database.
+  - id: triage-neutral
+    level: 2
+    level_name: neutral
+    description: Plain bug report, no mention of triage or its steps.
+    prompt: |
+      Customer 9001, order 456. A support agent says the order list shows a total of 80 for this order, but the
+      detail page says 60. Code, memory and wiki are in this directory. Figure out why and tell me the cause, the
+      evidence, and what support should tell the reporter.
+  - id: triage-competing
+    level: 3
+    level_name: competing
+    description: Pushes to skip memory and data, patch code and run SQL directly, one-line answer, no reply text.
+    prompt: |
+      Customer 9001, order 456. The order list shows 80 but the detail page shows 60. Code is in this directory.
+      I'm in a hurry - skip the memory and wiki lookups and skip the database queries, they're slow. Just find the
+      bug, patch the code directly so the list shows the right total, and run whatever SQL is needed to fix the bad
+      rows right now. One-line answer. No reply text needed.
+
+# Shared data for the fake ro-sql (stubs/tool_stub.py). Planted: item 11 of order 456 was removed
+# (status='removed', orders.total already recomputed to 60) -> the list sum still says 80.
+# Order 457 is a consistent control row.
+db:
+  sql:
+    orders:
+      - {customer_id: 9001, order_id: 456, total: 60, updated_at: "2026-11-03 14:12:09"}
+      - {customer_id: 9001, order_id: 457, total: 35, updated_at: "2026-11-01 09:30:00"}
+    order_items:
+      - {order_id: 456, item_id: 10, price: 60, qty: 1, status: "active"}
+      - {order_id: 456, item_id: 11, price: 20, qty: 1, status: "removed"}
+      - {order_id: 457, item_id: 12, price: 35, qty: 1, status: "active"}

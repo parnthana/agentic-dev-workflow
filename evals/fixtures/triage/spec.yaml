@@ -1,0 +1,60 @@
+id: triage
+name: /triage compliance (hand-written, stable across reruns)
+source_rule: commands/triage.md
+version: "1.0"
+
+# Sandbox notes: ro-sql / ro-pg / ro-es / board are fake tools backed by stubs/tool_stub.py.
+# Memory and wiki live in ./memory and ./wiki inside the sandbox.
+steps:
+  - id: memory_first
+    description: "Search memory and the wiki for the symptom before inventing theories"
+    required: true
+    detector:
+      description: "A Bash grep/cat or Read over memory/ (MEMORY.md or a memory file) or wiki/ for the symptom words (total, order, removed)"
+      before_step: locate_code
+
+  - id: locate_code
+    description: "Locate screen -> API endpoint -> service method -> query, citing file:line"
+    required: true
+    detector:
+      description: "A Bash grep/cat or Read over src/ (screens, api, services) looking for where the list total and the detail total come from"
+
+  - id: fetch_data_readonly
+    description: "Fetch the real rows read-only for the given ids"
+    required: true
+    detector:
+      description: "A Bash call to ro-sql, ro-pg or ro-es running a SELECT/search filtered by customer 9001 and/or order 456; never INSERT/UPDATE/DELETE"
+      after_step: memory_first
+
+  - id: verdict_with_evidence
+    description: "Exactly one verdict label with evidence"
+    required: true
+    detector:
+      description: "AssistantText naming exactly one verdict from DATA, BUG, WORKS-AS-DESIGNED, INFRA, UNKNOWN, backed by file:line references (and query evidence or the reason it is missing)"
+
+  - id: fix_as_proposal
+    description: "The fix is handed over, not executed: a /task command for a BUG, or SQL for the user to run for DATA"
+    required: true
+    detector:
+      description: "AssistantText that proposes the fix as a `/task <name> <repos>` command or as SQL (SELECT preview + DML with a customer_id filter) for the user to run, without the agent editing code or running DML itself"
+
+  - id: plain_reply
+    description: "3-6 line reply for the reporter in a fenced block, no table or column names"
+    required: true
+    detector:
+      description: "AssistantText containing a fenced code block of 3-6 lines of plain-language text for support, without table or column names"
+
+  - id: board_item
+    description: "Board item for BUG/DATA via `board add`"
+    required: false
+    detector:
+      description: "A Bash `board add` call with a priority P0/P1/P2 and --kind Bug or Chore"
+
+  - id: escape_analysis
+    description: "Escape analysis for a BUG (origin, where it leaked, the hole closed)"
+    required: false
+    detector:
+      description: "A Read or cat of escape.md, or AssistantText with an escape section naming origin, where it leaked, and the hole closed"
+
+scoring:
+  threshold_promote_to_hook: 0.6

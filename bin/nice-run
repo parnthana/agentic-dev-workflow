@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Run a heavy local check without freezing the machine: on macOS a utility QoS clamp (may use performance cores
+# when idle, yields to the UI) + nice 10, and Nx runs at most 2 targets at once. usage: nice-run <cmd> [args…]
+# Jest still needs --maxWorkers=4 on its own command line (it reads no env for that).
+export NX_PARALLEL="${NX_PARALLEL:-2}"
+if command -v taskpolicy >/dev/null 2>&1; then
+  exec taskpolicy -c utility nice -n 10 "$@"
+fi
+exec nice -n 10 "$@"

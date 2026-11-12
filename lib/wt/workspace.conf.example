@@ -1,0 +1,22 @@
+# Copy to ~/.config/agentic-dev/workspace.conf (override the path with $AGENTIC_DEV_CONF).
+# Plain zsh/bash syntax; it is sourced by wt, wt-ls, wt-done, ..., the guard hook and the task-context hook.
+
+# Directory that holds the main checkouts of every repo (and, below it, tasks/).
+WORKSPACE=$HOME/code/myworkspace
+
+# Repo folder names under $WORKSPACE (each one a git checkout). Used for usage hints and to tell
+# tasks/<repo>/<task> apart from other folders; any $WORKSPACE/<dir> with a .git also works.
+REPOS=(backend frontend api-contracts)
+
+# Feature worktrees branch off origin/$BASE_BRANCH; the "-main" twin branches off origin/$MAIN_BRANCH.
+# A repo without a $BASE_BRANCH branch gets a single worktree off $MAIN_BRANCH and no twin.
+BASE_BRANCH=dev
+MAIN_BRANCH=main
+
+# Optional: executable run as `$WT_SETUP <worktree-dir>` after a new worktree is created
+# (install dependencies, copy env files). wt runs it in the background and wt-ls shows its state.
+# WT_SETUP=$HOME/.local/bin/my-worktree-setup
+
+# Optional: command run in the background as `$WT_ON_TASK_START <task>` when the FIRST worktree of a
+# new task is created (e.g. move a board ticket to "in progress").
+# WT_ON_TASK_START=my-board-start

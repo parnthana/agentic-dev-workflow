@@ -1,0 +1,6 @@
+#!/usr/bin/env zsh
+# Task worktree command — the code is in ../lib/wt/lib.zsh (this file only runs the function of the same name).
+# ${0:A} resolves symlinks, so this works when linked into ~/.local/bin.
+emulate zsh
+source "${0:A:h:h}/lib/wt/lib.zsh" || exit 1
+"${0:t}" "$@"

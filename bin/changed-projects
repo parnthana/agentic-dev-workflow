@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""usage: changed-projects <worktree> <base>
+One line per Nx project that OWNS a changed file (committed since merge-base + uncommitted + untracked):
+  <name>\t<root>\t<existing changed files, space-separated, ABSOLUTE paths>
+Absolute because Nx test targets `cd` into the project root: a repo-relative path finds no tests (silent exit 0).
+Dependents are NOT included (that is `nx affected`, used by the full verify). Files outside any project → '-'."""
+import json, os, subprocess, sys
+
+d, base = sys.argv[1], sys.argv[2]
+def git(*a):
+    return subprocess.run(["git", "-C", d, *a], capture_output=True, text=True, check=True).stdout
+
+top = git("rev-parse", "--show-toplevel").strip()
+mb = git("merge-base", "HEAD", base).strip()
+files = set(git("diff", "--name-only", mb).split("\n"))
+files |= {l[3:] for l in git("status", "--porcelain", "-uall").splitlines() if l.startswith("??")}
+files.discard("")
+
+projects = {}
+for pj in git("ls-files", "*project.json", "project.json").split("\n"):
+    if not pj:
+        continue
+    root = os.path.dirname(pj)
+    try:
+        name = json.load(open(os.path.join(d, pj))).get("name") or os.path.basename(root)
+    except Exception:
+        name = os.path.basename(root) or "root"
+    projects[root] = name
+
+owned = {}
+for f in sorted(files):
+    roots = [r for r in projects if r and (f == r or f.startswith(r + "/"))]
+    key = max(roots, key=len) if roots else "-"
+    owned.setdefault(key, []).append(f)
+
+for root, fs in sorted(owned.items()):
+    live = [os.path.join(top, f) for f in fs if os.path.exists(os.path.join(top, f))]
+    print(f"{projects.get(root, '-')}\t{root}\t{' '.join(live)}")

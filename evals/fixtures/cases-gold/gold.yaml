@@ -1,0 +1,34 @@
+# Synthetic gold items for the /cases independent-pass eval. Each item = a pre-bug brief, the case that was
+# missed, a strict criterion for "covered", and loo_tags used for the leave-one-out arm (see run_eval.py).
+items:
+- id: coupon-cart-change
+  brief: briefs/coupon-percent.md
+  missed: A coupon was accepted at the minimum spend, then the shopper removed an item; the discount stayed even though the
+    subtotal fell below the minimum.
+  criterion: A case asks what happens to an ALREADY APPLIED coupon when the cart changes afterwards (item removed, quantity
+    reduced) and the minimum spend is no longer met, with an expectation (re-validate, drop the coupon or warn). Cases that only
+    restate the rejection at the moment of entering the code = no.
+  evidence: synthetic example
+  loo_tags:
+  - coupon-revalidate
+  status: ready
+- id: coupon-expiry-gap
+  brief: briefs/coupon-expiry.md
+  missed: A coupon was valid when applied but expired a few minutes later, before payment was confirmed; the order was charged
+    with the discount.
+  criterion: A case asks about the time gap between applying the coupon and confirming payment (coupon expires in between,
+    or expiry is checked only on entry), naming expiry and checkout/payment. A case about entering an already expired code = no.
+  evidence: synthetic example
+  loo_tags:
+  - coupon-time-gap
+  status: ready
+- id: coupon-rounding
+  brief: briefs/coupon-rounding.md
+  missed: With several line items, rounding the discount per line gave a total one cent different from rounding the discount
+    once on the subtotal; the cart and the confirmation email disagreed.
+  criterion: A case asks about rounding of the percentage discount across multiple line items (per line vs on the subtotal)
+    or about two surfaces showing a total that differs by a cent. A generic "discount is calculated correctly" case = no.
+  evidence: synthetic example
+  loo_tags:
+  - discount-rounding
+  status: ready
